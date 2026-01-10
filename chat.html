@@ -282,7 +282,7 @@
       ipdState.history.push({ ai: resolvedAi, me: myMove });
 
       // Display in chat
-      addMessage('system', `${roundLabel}: You -> ${myMove.toUpperCase()} ; AI -> ${resolvedAi.toUpperCase()}  (You +${mPoints}, AI +${aiPoints})`);
+      addMessage('system', `${roundLabel}: Opponent -> ${myMove.toUpperCase()} ; You -> ${resolvedAi.toUpperCase()}  (You +${mPoints}, AI +${aiPoints})`);
       myScoreEl.textContent = ipdState.myScore;
       aiScoreEl.textContent = ipdState.aiScore;
 
