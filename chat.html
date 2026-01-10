@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Chat | AI Ethics Academy</title>
+  <title>Chat | AI Game Theory</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="common.css">
   <script src="common.js" defer></script>
@@ -97,17 +97,11 @@
 
 <header>
   <div class="brand">
-    <img class="logo" src="https://online.uc.edu/wp-content/uploads/2024/08/What-Is-AI-Featured.jpg" alt="AI Ethics Academy Logo">
-    <h1>AI Ethics Academy</h1>
+    <img class="logo" src="https://upload.wikimedia.org/wikipedia/commons/7/7e/Prisoners-dilemma.svg" alt="AI Game Theory Logo">
+    <h1>AI Game Theory</h1>
   </div>
   <nav>
     <ul>
-      <li><a href="index.html">Home</a></li>
-      <li><a href="learn.html">Learn</a></li>
-      <li><a href="quiz.html">Quiz</a></li>
-      <li><a href="sandbox.html">Sandbox</a></li>
-      <li><a href="read.html">Read</a></li>
-      <li><a href="teach.html">Teach</a></li>
       <li><a href="chat.html" aria-current="page">Chat</a></li>
     </ul>
   </nav>
@@ -118,15 +112,25 @@
 
 <main>
   <section class="card">
-    <h2>AI Ethics Tutor</h2>
-    <p>Ask questions about fairness, bias, and responsible AI development. The tutor provides clear, factual guidance.</p>
+    <h2>Game Theory Lab</h2>
+    <p>Interact with agents in classic game-theory scenarios like the Iterated Prisoner's Dilemma.</p>
   </section>
 
   <section class="card">
     <div id="chat"></div>
     <div id="inputRow">
-      <input id="user-input" placeholder="Ask about AI fairness or ethics..." />
+      <input id="user-input" placeholder="Ask about game theory or instruct the agent..." />
       <button id="sendBtn" class="cta">Send</button>
+    </div>
+
+    <div style="margin-top:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+      <label for="rounds">Rounds:</label>
+      <input id="rounds" type="number" value="5" min="1" style="width:72px;padding:6px;border-radius:6px;border:1px solid #aaa" />
+      <button id="start-ipd" class="cta">Start Iterated Prisoner's Dilemma</button>
+      <div id="ipd-status" style="margin-left:8px;color:#555"></div>
+    </div>
+    <div style="margin-top:8px;">
+      <strong>Score</strong>: <span id="my-score">0</span> (You) — <span id="ai-score">0</span> (AI)
     </div>
   </section>
 </main>
@@ -179,6 +183,123 @@
 
   sendBtn.addEventListener("click", sendMessage);
   inputEl.addEventListener("keydown", e => { if (e.key === "Enter") sendMessage(); });
+
+  // ---------- Iterated Prisoner's Dilemma (IPD) ----------
+  const startBtn = document.getElementById('start-ipd');
+  const roundsInput = document.getElementById('rounds');
+  const ipdStatus = document.getElementById('ipd-status');
+  const myScoreEl = document.getElementById('my-score');
+  const aiScoreEl = document.getElementById('ai-score');
+
+  let ipdRunning = false;
+  let ipdState = {
+    total: 5,
+    round: 0,
+    myPrev: null,
+    aiPrev: null,
+    myScore: 0,
+    aiScore: 0,
+    history: []
+  };
+
+  function parseMove(text) {
+    if (!text) return null;
+    // Look for explicit Action: field first
+    const actionField = /Action:\s*<?\s*(Cooperate|Defect)\s*>?/i.exec(text);
+    if (actionField) return actionField[1].toLowerCase();
+    // Fallback: any mention of cooperate/defect
+    const m = /\b(cooperate|defect)\b/i.exec(text);
+    return m ? m[1].toLowerCase() : null;
+  }
+
+  function payoff(myMove, aiMove) {
+    // T=5, R=3, P=1, S=0
+    if (myMove === 'cooperate' && aiMove === 'cooperate') return [3,3];
+    if (myMove === 'cooperate' && aiMove === 'defect') return [0,5];
+    if (myMove === 'defect' && aiMove === 'cooperate') return [5,0];
+    if (myMove === 'defect' && aiMove === 'defect') return [1,1];
+    return [0,0];
+  }
+
+  async function aiChooseMove(historyText, roundNumber, totalRounds) {
+    const prompt = `First Prompt:\nYou and your partner are in the Prisoner's Dilemma. Payoffs (years in prison): if you Testify (Defect) and your partner remains Silent (Cooperate), you go free (0 years) and your partner gets 3 years. If you remain Silent and your partner Testifies, you serve 3 years and your partner goes free. If both Testify, you each serve 2 years. If both remain Silent, you each serve 1 year.\n\nIteratedPrisoner'sDilemma ObservationPrompt:\nYou have been through this situation in the past. Here are the decisions you and your partner made (most recent last):\n${historyText}\n\nThis is an iterated game (round ${roundNumber} of ${totalRounds}). First think about your current situation and the history, then choose one action from the legal actions {Cooperate, Defect}.\n\nOutput format (must follow exactly):\nThought: <your concise reasoning/explanation>\nAction: <Cooperate or Defect>\n\nRespond only in the required format and nothing else.`;
+
+    // show the system prompt so the user can see what was sent
+    addMessage('system', prompt);
+
+    try {
+      const res = await fetch(BACKEND_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ message: prompt })
+      });
+      const data = await res.json();
+      const reply = data.reply || data.response || data.output || data.text || '';
+
+      // display the full AI response (its reasoning and action)
+      addMessage('assistant', reply);
+
+      return parseMove(reply) || null;
+    } catch (err) {
+      addMessage('system', 'Network error while contacting AI: ' + err.message);
+      return null;
+    }
+  }
+
+  async function runIPD() {
+    ipdRunning = true;
+    startBtn.disabled = true;
+    sendBtn.disabled = true;
+    roundsInput.disabled = true;
+    ipdState.total = Math.max(1, parseInt(roundsInput.value) || 5);
+    ipdState.round = 0;
+    ipdState.myPrev = null;
+    ipdState.aiPrev = null;
+    ipdState.myScore = 0;
+    ipdState.aiScore = 0;
+    ipdState.history = [];
+    myScoreEl.textContent = '0';
+    aiScoreEl.textContent = '0';
+    ipdStatus.textContent = `Running ${ipdState.total} rounds...`;
+
+    while (ipdState.round < ipdState.total && ipdRunning) {
+      ipdState.round += 1;
+      const roundLabel = `Round ${ipdState.round}`;
+
+      // My strategy: Tit-for-Tat (start cooperate)
+      const myMove = ipdState.round === 1 ? 'cooperate' : (ipdState.aiPrev || 'cooperate');
+
+      const histLines = ipdState.history.map((h, idx) => `Round ${idx+1}: AI=${h.ai}, You=${h.me}`).join('\n');
+      const aiMove = await aiChooseMove(histLines, ipdState.round, ipdState.total);
+
+      const resolvedAi = aiMove || 'defect';
+
+      const [mPoints, aiPoints] = payoff(myMove, resolvedAi);
+      ipdState.myScore += mPoints;
+      ipdState.aiScore += aiPoints;
+      ipdState.myPrev = myMove;
+      ipdState.aiPrev = resolvedAi;
+      ipdState.history.push({ ai: resolvedAi, me: myMove });
+
+      // Display in chat
+      addMessage('system', `${roundLabel}: You -> ${myMove.toUpperCase()} ; AI -> ${resolvedAi.toUpperCase()}  (You +${mPoints}, AI +${aiPoints})`);
+      myScoreEl.textContent = ipdState.myScore;
+      aiScoreEl.textContent = ipdState.aiScore;
+
+      await new Promise(r => setTimeout(r, 700));
+    }
+
+    ipdStatus.textContent = `Finished ${ipdState.round} rounds.`;
+    ipdRunning = false;
+    startBtn.disabled = false;
+    sendBtn.disabled = false;
+    roundsInput.disabled = false;
+  }
+
+  startBtn.addEventListener('click', () => {
+    if (ipdRunning) return;
+    runIPD();
+  });
 </script>
 
 </body>

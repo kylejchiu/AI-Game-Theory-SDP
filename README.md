@@ -4,9 +4,17 @@
 
 ## Overview
 
-AI-Ethics-Academy is an educational website created for the **Congressional App Challenge (CAC)**.
-It helps students, developers, and the public understand the **social and ethical implications of artificial intelligence**, including fairness, transparency, accountability, and safety.
-Through lessons, a quiz, and an interactive chatbot, the site encourages critical thinking about responsible AI development.
+
+# AI Game Theory
+
+This repository is a minimal demo for AI game-theory experiments, focused on an Iterated Prisoner's Dilemma (IPD) interactive demo located in `chat.html`.
+
+Usage:
+
+- Start the backend: `node server.js`
+- Open `chat.html` in your browser (or visit the server root).
+
+The UI provides a simple chat interface and an IPD runner that plays multiple rounds against the AI.
 
 ## Features
 

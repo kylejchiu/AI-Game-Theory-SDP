@@ -2,6 +2,7 @@ import express from "express";
 import fetch from "node-fetch";
 import cors from "cors";
 import dotenv from "dotenv";
+import path from 'path';
 
 dotenv.config();
 const app = express();
@@ -10,7 +11,7 @@ app.use(cors());
 app.use(express.json());
 
 app.get("/", (req, res) => {
-  res.send("AI Ethics Chatbot Backend is running!");
+  res.sendFile(path.join(process.cwd(), 'chat.html'));
 });
 
 app.get("/healthz", (req, res) => {
@@ -31,7 +32,7 @@ app.post("/chat", async (req, res) => {
 
     const systemPrompt =
       process.env.SYSTEM_PROMPT ||
-      "You are a concise AI tutor who explains AI ethics clearly and factually.";
+      "You are a concise AI game theory agent. Answer questions about game theory and, when asked to choose actions in games, follow instructions precisely.";
 
     const model =
       process.env.OPENROUTER_MODEL; //
@@ -81,5 +82,11 @@ app.post("/chat", async (req, res) => {
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`AI Game Theory backend running on port ${PORT}`);
+});
+
+// Serve chat.html for any other GET route (single-page entry)
+app.get('*', (req, res) => {
+  if (req.method !== 'GET') return res.status(405).end();
+  res.sendFile(path.join(process.cwd(), 'chat.html'));
 });
