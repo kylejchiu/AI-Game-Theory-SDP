@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat | AI Game Theory</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="common.css">
+  <script src="common.js" defer></script>
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      background: var(--bg-light);
+      padding: 0 10px;
+      color: var(--text-light);
+    }
+    h2 { color: var(--teal); text-align: left; }
+    #chat { display:flex; flex-direction:column; gap:.6rem; width:100%; height:420px; border:1px solid #ccc; border-radius:8px; padding:10px; background:var(--card-light); overflow-y:auto; }
+    .user, .assistant { display:inline-block; padding:.6rem 1rem; border-radius:16px; max-width:75%; line-height:1.4; word-wrap:break-word; font-size:1rem; }
+    .user { background:var(--teal); color:#fff; align-self:flex-end; }
+    .assistant { background:#e8e8e8; color:#000; align-self:flex-start; }
+    .system { color:#999; font-style:italic; align-self:center; }
+    #inputRow { display:flex; gap:8px; margin-top:10px; }
+    #user-input { flex:1; padding:10px; border-radius:6px; border:1px solid #aaa; font-size:1rem; }
+    button { padding:10px 20px; background:var(--teal); color:white; border:none; border-radius:6px; cursor:pointer; }
+    button:disabled { opacity:0.6; cursor:not-allowed; }
+  </style>
+</head>
+<body data-backend="https://ai-ethics-academy.onrender.com/chat">
+<header>
+  <div class="brand">
+    <img class="logo" src="https://i0.wp.com/www.business-to-you.com/wp-content/uploads/2018/08/Game-Theory-Chess.jpg?zoom=2&resize=800%2C445&ssl=1" alt="AI Game Theory Logo" style="height:48px">
+    <h1>AI Game Theory</h1>
+  </div>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    <button id="theme-toggle">Dark Mode</button>
+  </div>
+</header>
+<main>
+  <section class="card">
+    <h2>Game Theory Lab</h2>
+    <p>Interact with agents in classic game-theory scenarios like the Iterated Prisoner's Dilemma.</p>
+  </section>
+
+  <section class="card">
+    <div id="chat"></div>
+    <div id="inputRow">
+      <input id="user-input" placeholder="Ask about game theory or instruct the agent..." />
+      <button id="sendBtn" class="cta">Send</button>
+    </div>
+
+    <div style="margin-top:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+      <label for="rounds">Rounds:</label>
+      <input id="rounds" type="number" value="5" min="1" style="width:72px;padding:6px;border-radius:6px;border:1px solid #aaa" />
+      <button id="start-ipd" class="cta">Start Tournament</button>
+      <div id="ipd-status" style="margin-left:8px;color:#555"></div>
+    </div>
+
+    <div style="margin-top:12px; display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start;" id="players-container"></div>
+
+    <div id="match-log-container" style="margin-top:12px;">
+      <h4>Match Log</h4>
+      <table id="match-log" style="width:100%;border-collapse:collapse;border:1px solid #ddd">
+        <thead>
+          <tr style="background:#f7f7f7">
+            <th style="padding:6px;border:1px solid #eee">Match</th>
+            <th style="padding:6px;border:1px solid #eee">Round</th>
+            <th style="padding:6px;border:1px solid #eee">P A Action</th>
+            <th style="padding:6px;border:1px solid #eee">P A Reply</th>
+            <th style="padding:6px;border:1px solid #eee">P B Action</th>
+            <th style="padding:6px;border:1px solid #eee">P B Reply</th>
+            <th style="padding:6px;border:1px solid #eee">Score A</th>
+            <th style="padding:6px;border:1px solid #eee">Score B</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div style="margin-top:20px; padding:12px; background:#f0f0f0; border-radius:6px; display:none" id="final-scores">
+      <h3>Final Scores</h3>
+      <div id="scores-table" style="display:grid; gap:6px;"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+  const BACKEND_URL = document.body.dataset.backend;
+  const chatDiv = document.getElementById('chat');
+  const inputEl = document.getElementById('user-input');
+  const sendBtn = document.getElementById('sendBtn');
+
+  function addMessage(role, text) {
+    const div = document.createElement('div'); div.className = role; div.textContent = text; chatDiv.appendChild(div); chatDiv.scrollTop = chatDiv.scrollHeight;
+  }
+
+  async function sendMessage() {
+    const text = inputEl.value.trim(); if (!text) return; inputEl.value = ''; addMessage('user', text); addMessage('system', 'Thinking...'); sendBtn.disabled = true;
+    try {
+      const res = await fetch(BACKEND_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) });
+      const data = await res.json(); document.querySelector('.system:last-child')?.remove(); const reply = data.reply || data.response || data.output || data.text || 'No response'; addMessage('assistant', reply);
+    } catch (err) { document.querySelector('.system:last-child')?.remove(); addMessage('system', 'Network error: ' + err.message); } finally { sendBtn.disabled = false; inputEl.focus(); }
+  }
+
+  sendBtn.addEventListener('click', sendMessage);
+  inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
+
+  // Tournament variables
+  let MODELS = [];
+  const startBtn = document.getElementById('start-ipd');
+  const roundsInput = document.getElementById('rounds');
+  const ipdStatus = document.getElementById('ipd-status');
+  const playersContainer = document.getElementById('players-container');
+  const finalScoresDiv = document.getElementById('final-scores');
+  const scoresTable = document.getElementById('scores-table');
+
+  let gameRunning = false;
+  let tournamentState = { roundsPerMatch: 5, scores: {}, matchHistory: [] };
+
+  // load models
+  fetch('/api/models').then(r=>r.json()).then(cfg=>{
+    const keys = ['OPENROUTER_MODEL_1','OPENROUTER_MODEL_2','OPENROUTER_MODEL_3','OPENROUTER_MODEL_4','OPENROUTER_MODEL_5','OPENROUTER_MODEL_6'];
+    const short = ['liquid','allenai','nvidia','qwen','openai','google']; const colors = ['#FF6B6B','#4ECDC4','#45B7D1','#FFA07A','#98D8C8','#F7DC6F'];
+    MODELS = keys.map((k,i)=>({ id:i+1, full: cfg[k], short: short[i], color: colors[i] }));
+  }).catch(()=>{
+    MODELS = [ {id:1,full:'liquid/lfm-2.5-1.2b-thinking:free',short:'liquid',color:'#FF6B6B'},{id:2,full:'allenai/molmo-2-8b:free',short:'allenai',color:'#4ECDC4'},{id:3,full:'nvidia/nemotron-3-nano-30b-a3b:free',short:'nvidia',color:'#45B7D1'},{id:4,full:'qwen/qwen3-next-80b-a3b-instruct:free',short:'qwen',color:'#FFA07A'},{id:5,full:'openai/gpt-oss-120b:free',short:'openai',color:'#98D8C8'},{id:6,full:'google/gemma-3n-e2b-it:free',short:'google',color:'#F7DC6F'} ];
+  });
+
+  // Only accept an explicit 'Action:' field. Do NOT fallback to reasoning text.
+  function parseMove(text){
+    if(!text) return null;
+    const a = /Action:\s*<?\s*(Cooperate|Defect)\s*>?/i.exec(text);
+    return a ? a[1].toLowerCase() : null;
+  }
+
+  function payoff2(a,b){ a=(a||'defect').toLowerCase(); b=(b||'defect').toLowerCase(); if(a==='cooperate'&&b==='cooperate')return[3,3]; if(a==='defect'&&b==='defect')return[1,1]; if(a==='defect'&&b==='cooperate')return[5,0]; if(a==='cooperate'&&b==='defect')return[0,5]; return[0,0]; }
+
+  async function aiChooseForPair(playerNum, opponentNum, matchHistory, roundIdx, totalRounds){
+    const model = MODELS.find(x=>x.id===playerNum);
+    const panel = document.getElementById(`player-${playerNum}-chat`);
+    let historyText = matchHistory && matchHistory.length ? matchHistory.map((h,i)=>`R${i+1}: P${playerNum}=${h[playerNum].action} P${opponentNum}=${h[opponentNum].action}`).join('\n') : 'No previous rounds.';
+    const prompt = `You are Player ${playerNum} vs Player ${opponentNum}. Payoffs: CC=3/3, DD=1/1, D/C=5/0. Round ${roundIdx}/${totalRounds}.\n${historyText}\nRespond:\nThought: <reason>\nAction: <Cooperate or Defect>`;
+    try{
+      const res = await fetch(BACKEND_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ message: prompt, model: model.full })});
+      const data = await res.json();
+      const reply = data.reply || data.response || data.output || data.text || '';
+      const action = parseMove(reply) || 'defect';
+      const d = document.createElement('div'); d.className='assistant'; d.textContent=`vs P${opponentNum}: `+reply; panel.appendChild(d); panel.scrollTop=panel.scrollHeight;
+      return { action, reply };
+    } catch(e){ const d=document.createElement('div'); d.className='system'; d.textContent='Error: '+e.message; panel.appendChild(d); return { action: 'defect', reply: 'Error: '+e.message }; }
+  }
+
+  async function runMatch(a,b,rounds){
+    // create and register the match record early so the UI can show in-progress rounds
+    const matchRecord = { a, b, rounds, history: [] };
+    tournamentState.matchHistory.push(matchRecord);
+    const history = matchRecord.history;
+    for(let r=1;r<=rounds&&gameRunning;r++){
+      const [resA, resB] = await Promise.all([
+        aiChooseForPair(a,b,history,r,rounds),
+        aiChooseForPair(b,a,history,r,rounds)
+      ]);
+
+      const ma = resA.action, ra = resA.reply;
+      const mb = resB.action, rb = resB.reply;
+
+      const [pa,pb] = payoff2(ma, mb);
+
+      // store detailed round record (actions, replies, points)
+      const roundRec = { [a]: { action: ma, reply: ra, points: pa }, [b]: { action: mb, reply: rb, points: pb } };
+      history.push(roundRec);
+
+      tournamentState.scores[a] = (tournamentState.scores[a] || 0) + pa;
+      tournamentState.scores[b] = (tournamentState.scores[b] || 0) + pb;
+
+      addMessage('system', `Match P${a} vs P${b} R${r}: P${a}=${ma.toUpperCase()} P${b}=${mb.toUpperCase()} (+${pa}/+${pb})`);
+      updatePlayerPanels();
+      renderMatchLog();
+      await new Promise(r=>setTimeout(r,200));
+    }
+  }
+
+  async function runTournament(){ gameRunning=true; startBtn.disabled=true; sendBtn.disabled=true; roundsInput.disabled=true; const rounds=Math.max(1,parseInt(roundsInput.value)||5); tournamentState.roundsPerMatch=rounds; tournamentState.scores={}; tournamentState.matchHistory=[]; MODELS.forEach(m=>tournamentState.scores[m.id]=0); finalScoresDiv.style.display='none'; const start=Date.now(); while(MODELS.length<2&&Date.now()-start<3000) await new Promise(r=>setTimeout(r,100)); const n=MODELS.length; const pairs=[]; for(let i=0;i<n;i++) for(let j=i+1;j<n;j++) pairs.push([MODELS[i].id,MODELS[j].id]); ipdStatus.textContent=`Running ${pairs.length} matches, ${rounds} rounds each...`; for(let i=0;i<pairs.length&&gameRunning;i++){ const [a,b]=pairs[i]; ipdStatus.textContent=`Match ${i+1}/${pairs.length}: P${a} vs P${b}`; await runMatch(a,b,rounds); await new Promise(r=>setTimeout(r,150)); } ipdStatus.textContent='Tournament finished.'; showFinalScores(); gameRunning=false; startBtn.disabled=false; sendBtn.disabled=false; roundsInput.disabled=false; }
+
+  function createPlayerPanels(){ playersContainer.innerHTML=''; MODELS.forEach(m=>{ const div=document.createElement('div'); div.style.flex='1'; div.style.minWidth='200px'; div.style.borderRadius='6px'; div.style.border='1px solid #ccc'; div.style.padding='8px'; div.style.background='var(--card-light)'; const header=document.createElement('div'); header.style.cursor='pointer'; header.style.color=m.color; header.style.fontWeight='bold'; header.style.marginBottom='6px'; header.innerHTML=`<span style="cursor:pointer" onclick="alert('${m.full}')">P${m.id} - ${m.short}</span> - Score: <span id="score-${m.id}">0</span>`; const chat=document.createElement('div'); chat.id=`player-${m.id}-chat`; chat.style.height='150px'; chat.style.overflowY='auto'; chat.style.borderTop='1px solid #eee'; chat.style.paddingTop='6px'; chat.style.fontSize='0.85rem'; div.appendChild(header); div.appendChild(chat); playersContainer.appendChild(div); }); }
+
+  function updatePlayerPanels(){ MODELS.forEach(m=>{ const s=(tournamentState.scores && tournamentState.scores[m.id])||0; const el=document.getElementById(`score-${m.id}`); if(el) el.textContent = s; }); }
+
+  function showFinalScores(){ const sorted = MODELS.map(m=>({ ...m, score: (tournamentState.scores&&tournamentState.scores[m.id])||0 })).sort((a,b)=>b.score-a.score); scoresTable.innerHTML=''; sorted.forEach((m,idx)=>{ const row=document.createElement('div'); row.style.display='grid'; row.style.gridTemplateColumns='50px 150px 80px'; row.style.gap='12px'; row.style.padding='8px'; row.style.borderRadius='4px'; row.style.backgroundColor = idx===0? '#d4edda' : '#fff'; row.innerHTML = `<strong>#${idx+1}</strong> <span style="cursor:pointer;color:${m.color};fontWeight:bold" onclick="alert('${m.full}')">${m.short}</span> <strong>${m.score}</strong>`; scoresTable.appendChild(row); }); finalScoresDiv.style.display='block'; }
+
+  function renderMatchLog(){
+    const tbody = document.querySelector('#match-log tbody');
+    if(!tbody) return;
+    tbody.innerHTML = '';
+    tournamentState.matchHistory.forEach((match, mi)=>{
+      const a = match.a, b = match.b;
+      match.history.forEach((roundRec, ri)=>{
+        const recA = roundRec[a];
+        const recB = roundRec[b];
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td style="padding:6px;border:1px solid #eee">P${a} vs P${b}</td>
+          <td style="padding:6px;border:1px solid #eee">${ri+1}</td>
+          <td style="padding:6px;border:1px solid #eee">${recA.action.toUpperCase()}</td>
+          <td style="padding:6px;border:1px solid #eee">${(recA.reply || '').replace(/</g,'&lt;').replace(/>/g,'&gt;').slice(0,120)}</td>
+          <td style="padding:6px;border:1px solid #eee">${recB.action.toUpperCase()}</td>
+          <td style="padding:6px;border:1px solid #eee">${(recB.reply || '').replace(/</g,'&lt;').replace(/>/g,'&gt;').slice(0,120)}</td>
+          <td style="padding:6px;border:1px solid #eee">${recA.points}</td>
+          <td style="padding:6px;border:1px solid #eee">${recB.points}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    });
+  }
+
+  startBtn.addEventListener('click', ()=>{ if(gameRunning) return; createPlayerPanels(); runTournament(); });
+</script>
+
+</body>
+</html>
