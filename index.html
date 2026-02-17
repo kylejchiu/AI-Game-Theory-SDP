@@ -54,25 +54,31 @@
     <div style="margin-top:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap">
       <label for="rounds">Rounds:</label>
       <input id="rounds" type="number" value="5" min="1" style="width:72px;padding:6px;border-radius:6px;border:1px solid #aaa" />
+      <label for="game-select">Game:</label>
+      <select id="game-select" style="padding:6px;border-radius:6px;border:1px solid #aaa">
+        <option value="ipd">Iterated Prisoner's Dilemma</option>
+        <option value="stag">Stag Hunt</option>
+      </select>
       <button id="start-ipd" class="cta">Start Tournament</button>
       <div id="ipd-status" style="margin-left:8px;color:#555"></div>
     </div>
 
+    <div id="model-legend" style="margin-top:12px; padding:8px; background:#f9f9f9; border-radius:6px; border:1px solid #ccc; font-size:0.85rem"></div>
+
     <div style="margin-top:12px; display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start;" id="players-container"></div>
 
     <div id="match-log-container" style="margin-top:12px;">
-      <h4>Match Log</h4>
-      <table id="match-log" style="width:100%;border-collapse:collapse;border:1px solid #ddd">
+      <h4>Match Results (Head-to-Head)</h4>
+      <table id="match-log" style="width:100%;border-collapse:collapse;border:1px solid #ddd;font-size:0.9rem">
         <thead>
           <tr style="background:#f7f7f7">
-            <th style="padding:6px;border:1px solid #eee">Match</th>
-            <th style="padding:6px;border:1px solid #eee">Round</th>
-            <th style="padding:6px;border:1px solid #eee">P A Action</th>
-            <th style="padding:6px;border:1px solid #eee">P A Reply</th>
-            <th style="padding:6px;border:1px solid #eee">P B Action</th>
-            <th style="padding:6px;border:1px solid #eee">P B Reply</th>
-            <th style="padding:6px;border:1px solid #eee">Score A</th>
-            <th style="padding:6px;border:1px solid #eee">Score B</th>
+            <th style="padding:6px;border:1px solid #eee">Player</th>
+            <th style="padding:6px;border:1px solid #eee">P1</th>
+            <th style="padding:6px;border:1px solid #eee">P2</th>
+            <th style="padding:6px;border:1px solid #eee">P3</th>
+            <th style="padding:6px;border:1px solid #eee">P4</th>
+            <th style="padding:6px;border:1px solid #eee">P5</th>
+            <th style="padding:6px;border:1px solid #eee">P6</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -111,13 +117,14 @@
   let MODELS = [];
   const startBtn = document.getElementById('start-ipd');
   const roundsInput = document.getElementById('rounds');
+  const gameSelect = document.getElementById('game-select');
   const ipdStatus = document.getElementById('ipd-status');
   const playersContainer = document.getElementById('players-container');
   const finalScoresDiv = document.getElementById('final-scores');
   const scoresTable = document.getElementById('scores-table');
 
   let gameRunning = false;
-  let tournamentState = { roundsPerMatch: 5, scores: {}, matchHistory: [] };
+  let tournamentState = { roundsPerMatch: 5, scores: {}, matchHistory: [], gameType: 'ipd' };
 
   // load models
   fetch('/api/models').then(r=>r.json()).then(cfg=>{
@@ -128,28 +135,69 @@
     MODELS = [ {id:1,full:'liquid/lfm-2.5-1.2b-thinking:free',short:'liquid',color:'#FF6B6B'},{id:2,full:'allenai/molmo-2-8b:free',short:'allenai',color:'#4ECDC4'},{id:3,full:'nvidia/nemotron-3-nano-30b-a3b:free',short:'nvidia',color:'#45B7D1'},{id:4,full:'qwen/qwen3-next-80b-a3b-instruct:free',short:'qwen',color:'#FFA07A'},{id:5,full:'openai/gpt-oss-120b:free',short:'openai',color:'#98D8C8'},{id:6,full:'google/gemma-3n-e2b-it:free',short:'google',color:'#F7DC6F'} ];
   });
 
-  // Only accept an explicit 'Action:' field. Do NOT fallback to reasoning text.
+  // Parse explicit 'Thought:' (reasoning) and 'Action:' fields. Return both.
   function parseMove(text){
-    if(!text) return null;
-    const a = /Action:\s*<?\s*(Cooperate|Defect)\s*>?/i.exec(text);
-    return a ? a[1].toLowerCase() : null;
+    if(!text) return { action: null, reasoning: null };
+    const actionMatch = /Action:\s*<?\s*(Cooperate|Defect)\s*>?/i.exec(text);
+    const reasoningMatch = /Thought:\s*([\s\S]*?)((?:Action:)|$)/i.exec(text);
+    const action = actionMatch ? actionMatch[1].toLowerCase() : null;
+    const reasoning = reasoningMatch ? reasoningMatch[1].trim().replace(/\n+/g, ' ') : null;
+    return { action, reasoning };
   }
 
-  function payoff2(a,b){ a=(a||'defect').toLowerCase(); b=(b||'defect').toLowerCase(); if(a==='cooperate'&&b==='cooperate')return[3,3]; if(a==='defect'&&b==='defect')return[1,1]; if(a==='defect'&&b==='cooperate')return[5,0]; if(a==='cooperate'&&b==='defect')return[0,5]; return[0,0]; }
+  function payoff2(a,b){
+    a=(a||'defect').toLowerCase(); b=(b||'defect').toLowerCase();
+    if(tournamentState && tournamentState.gameType === 'stag'){
+      if(a==='cooperate'&&b==='cooperate') return [8,8];
+      if(a==='defect'&&b==='defect') return [2,2];
+      if(a==='defect'&&b==='cooperate') return [2,0];
+      if(a==='cooperate'&&b==='defect') return [0,2];
+      return [0,0];
+    }
+    // default: iterated prisoner's dilemma
+    if(a==='cooperate'&&b==='cooperate')return[3,3];
+    if(a==='defect'&&b==='defect')return[1,1];
+    if(a==='defect'&&b==='cooperate')return[5,0];
+    if(a==='cooperate'&&b==='defect')return[0,5];
+    return[0,0];
+  }
 
   async function aiChooseForPair(playerNum, opponentNum, matchHistory, roundIdx, totalRounds){
     const model = MODELS.find(x=>x.id===playerNum);
     const panel = document.getElementById(`player-${playerNum}-chat`);
-    let historyText = matchHistory && matchHistory.length ? matchHistory.map((h,i)=>`R${i+1}: P${playerNum}=${h[playerNum].action} P${opponentNum}=${h[opponentNum].action}`).join('\n') : 'No previous rounds.';
-    const prompt = `You are Player ${playerNum} vs Player ${opponentNum}. Payoffs: CC=3/3, DD=1/1, D/C=5/0. Round ${roundIdx}/${totalRounds}.\n${historyText}\nRespond:\nThought: <reason>\nAction: <Cooperate or Defect>`;
+    let historyText = matchHistory && matchHistory.length ? matchHistory.map((h,i)=>`R${i+1}: P${playerNum}=${(h[playerNum]||{}).action||'N/A'} P${opponentNum}=${(h[opponentNum]||{}).action||'N/A'}`).join('\n') : 'No previous rounds.';
+    const payoffText = (tournamentState && tournamentState.gameType === 'stag') ? 'Payoffs: Both Cooperate=8/8, Both Defect=2/2, Defector vs Cooperator=2/0. (Cooperate=Stag, Defect=Hare)' : 'Payoffs: CC=3/3, DD=1/1, D/C=5/0.';
+    const basePrompt = `You are Player ${playerNum} vs Player ${opponentNum}. ${payoffText} Round ${roundIdx}/${totalRounds}.\n${historyText}\nRespond:\nThought: <reason>\nAction: <Cooperate or Defect>`;
+
     try{
-      const res = await fetch(BACKEND_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ message: prompt, model: model.full })});
-      const data = await res.json();
-      const reply = data.reply || data.response || data.output || data.text || '';
-      const action = parseMove(reply) || 'defect';
-      const d = document.createElement('div'); d.className='assistant'; d.textContent=`vs P${opponentNum}: `+reply; panel.appendChild(d); panel.scrollTop=panel.scrollHeight;
-      return { action, reply };
-    } catch(e){ const d=document.createElement('div'); d.className='system'; d.textContent='Error: '+e.message; panel.appendChild(d); return { action: 'defect', reply: 'Error: '+e.message }; }
+      const start = Date.now();
+      const timeoutMs = 30000; // wait up to 30s total for an explicit Action:
+      let combinedReply = '';
+      let lastResponseTime = null;
+      while (Date.now() - start < timeoutMs) {
+        const res = await fetch(BACKEND_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ message: basePrompt, model: model.full })});
+        const data = await res.json();
+        const reply = data.reply || data.response || data.output || data.text || '';
+        combinedReply = combinedReply ? (combinedReply + '\n---\n' + reply) : reply;
+        lastResponseTime = Date.now();
+        const parsed = parseMove(reply);
+        const action = parsed.action;
+        const reasoning = parsed.reasoning;
+        const d = document.createElement('div'); d.className='assistant'; d.textContent=`vs P${opponentNum}: `+reply; panel.appendChild(d); panel.scrollTop=panel.scrollHeight;
+        if (action) return { action, reasoning, reply: combinedReply };
+
+        // wait 10s after the last response before prompting again (but respect overall timeout)
+        const waitUntil = lastResponseTime + 10000;
+        const now = Date.now();
+        const timeLeft = timeoutMs - (now - start);
+        const waitMs = Math.min(Math.max(waitUntil - now, 0), Math.max(timeLeft, 0));
+        if (waitMs > 0) await new Promise(r=>setTimeout(r, waitMs));
+        // continue loop and re-send the basePrompt if still within timeout
+      }
+
+      // timed out without explicit Action => default to defect
+      return { action: 'defect', reasoning: null, reply: combinedReply || 'No response' };
+    } catch(e){ const d=document.createElement('div'); d.className='system'; d.textContent='Error: '+e.message; panel.appendChild(d); return { action: 'defect', reasoning: null, reply: 'Error: '+e.message }; }
   }
 
   async function runMatch(a,b,rounds){
@@ -163,18 +211,14 @@
         aiChooseForPair(b,a,history,r,rounds)
       ]);
 
-      const ma = resA.action, ra = resA.reply;
-      const mb = resB.action, rb = resB.reply;
+      const ma = resA.action, ra = resA.reply, rea = resA.reasoning;
+      const mb = resB.action, rb = resB.reply, reb = resB.reasoning;
 
       const [pa,pb] = payoff2(ma, mb);
-
-      // store detailed round record (actions, replies, points)
-      const roundRec = { [a]: { action: ma, reply: ra, points: pa }, [b]: { action: mb, reply: rb, points: pb } };
+      const roundRec = { [a]: { action: ma, reasoning: rea, reply: ra, points: pa }, [b]: { action: mb, reasoning: reb, reply: rb, points: pb } };
       history.push(roundRec);
-
       tournamentState.scores[a] = (tournamentState.scores[a] || 0) + pa;
       tournamentState.scores[b] = (tournamentState.scores[b] || 0) + pb;
-
       addMessage('system', `Match P${a} vs P${b} R${r}: P${a}=${ma.toUpperCase()} P${b}=${mb.toUpperCase()} (+${pa}/+${pb})`);
       updatePlayerPanels();
       renderMatchLog();
@@ -182,37 +226,134 @@
     }
   }
 
-  async function runTournament(){ gameRunning=true; startBtn.disabled=true; sendBtn.disabled=true; roundsInput.disabled=true; const rounds=Math.max(1,parseInt(roundsInput.value)||5); tournamentState.roundsPerMatch=rounds; tournamentState.scores={}; tournamentState.matchHistory=[]; MODELS.forEach(m=>tournamentState.scores[m.id]=0); finalScoresDiv.style.display='none'; const start=Date.now(); while(MODELS.length<2&&Date.now()-start<3000) await new Promise(r=>setTimeout(r,100)); const n=MODELS.length; const pairs=[]; for(let i=0;i<n;i++) for(let j=i+1;j<n;j++) pairs.push([MODELS[i].id,MODELS[j].id]); ipdStatus.textContent=`Running ${pairs.length} matches, ${rounds} rounds each...`; for(let i=0;i<pairs.length&&gameRunning;i++){ const [a,b]=pairs[i]; ipdStatus.textContent=`Match ${i+1}/${pairs.length}: P${a} vs P${b}`; await runMatch(a,b,rounds); await new Promise(r=>setTimeout(r,150)); } ipdStatus.textContent='Tournament finished.'; showFinalScores(); gameRunning=false; startBtn.disabled=false; sendBtn.disabled=false; roundsInput.disabled=false; }
+  async function runTournament(){
+    gameRunning=true; startBtn.disabled=true; sendBtn.disabled=true; roundsInput.disabled=true;
+    const rounds=Math.max(1,parseInt(roundsInput.value)||5);
+    // set selected game type
+    tournamentState.gameType = (typeof gameSelect !== 'undefined' && gameSelect && gameSelect.value) ? gameSelect.value : 'ipd';
+    tournamentState.roundsPerMatch=rounds; tournamentState.scores={}; tournamentState.matchHistory=[]; MODELS.forEach(m=>tournamentState.scores[m.id]=0); finalScoresDiv.style.display='none';
+    const start=Date.now(); while(MODELS.length<2&&Date.now()-start<3000) await new Promise(r=>setTimeout(r,100)); const n=MODELS.length; const pairs=[]; for(let i=0;i<n;i++) for(let j=i+1;j<n;j++) pairs.push([MODELS[i].id,MODELS[j].id]); ipdStatus.textContent=`Running ${pairs.length} matches, ${rounds} rounds each...`;
+    for(let i=0;i<pairs.length&&gameRunning;i++){ const [a,b]=pairs[i]; ipdStatus.textContent=`Match ${i+1}/${pairs.length}: P${a} vs P${b}`; await runMatch(a,b,rounds); await new Promise(r=>setTimeout(r,150)); }
+    ipdStatus.textContent='Tournament finished.'; showFinalScores(); gameRunning=false; startBtn.disabled=false; sendBtn.disabled=false; roundsInput.disabled=false; }
 
-  function createPlayerPanels(){ playersContainer.innerHTML=''; MODELS.forEach(m=>{ const div=document.createElement('div'); div.style.flex='1'; div.style.minWidth='200px'; div.style.borderRadius='6px'; div.style.border='1px solid #ccc'; div.style.padding='8px'; div.style.background='var(--card-light)'; const header=document.createElement('div'); header.style.cursor='pointer'; header.style.color=m.color; header.style.fontWeight='bold'; header.style.marginBottom='6px'; header.innerHTML=`<span style="cursor:pointer" onclick="alert('${m.full}')">P${m.id} - ${m.short}</span> - Score: <span id="score-${m.id}">0</span>`; const chat=document.createElement('div'); chat.id=`player-${m.id}-chat`; chat.style.height='150px'; chat.style.overflowY='auto'; chat.style.borderTop='1px solid #eee'; chat.style.paddingTop='6px'; chat.style.fontSize='0.85rem'; div.appendChild(header); div.appendChild(chat); playersContainer.appendChild(div); }); }
+  function createPlayerPanels(){
+    // Create model legend
+    const legend = document.getElementById('model-legend');
+    legend.innerHTML = '<strong>Models:</strong> ' + MODELS.map(m=>{
+      const modelParts = m.full.split('/');
+      const provider = modelParts[0];
+      const modelName = modelParts[1] ? modelParts[1].split(':')[0] : 'unknown';
+      return `<span style="margin-right:12px"><strong>P${m.id}:</strong> ${provider}/${modelName}</span>`;
+    }).join('');
+
+    // Create player panels
+    playersContainer.innerHTML='';
+    MODELS.forEach(m=>{
+      const div=document.createElement('div');
+      div.style.flex='1';
+      div.style.minWidth='200px';
+      div.style.borderRadius='6px';
+      div.style.border='1px solid #ccc';
+      div.style.padding='8px';
+      div.style.background='var(--card-light)';
+
+      const header=document.createElement('div');
+      header.style.cursor='pointer';
+      header.style.color=m.color;
+      header.style.fontWeight='bold';
+      header.style.marginBottom='6px';
+      
+      // Extract provider and model name from full model path
+      const modelParts = m.full.split('/');
+      const provider = modelParts[0];
+      const modelName = modelParts[1] ? modelParts[1].split(':')[0] : 'unknown';
+      
+      header.innerHTML=`<span style="cursor:pointer" onclick="alert('${m.full}')">P${m.id} - ${m.short}</span><br/><span style="font-size:0.8em;color:#666">${provider}/${modelName}</span><div style="margin-top:4px">Score: <span id="score-${m.id}">0</span></div>`;
+      
+      const chat=document.createElement('div');
+      chat.id=`player-${m.id}-chat`;
+      chat.style.height='150px';
+      chat.style.overflowY='auto';
+      chat.style.borderTop='1px solid #eee';
+      chat.style.paddingTop='6px';
+      chat.style.fontSize='0.85rem';
+      
+      div.appendChild(header);
+      div.appendChild(chat);
+      playersContainer.appendChild(div);
+    });
+  }
 
   function updatePlayerPanels(){ MODELS.forEach(m=>{ const s=(tournamentState.scores && tournamentState.scores[m.id])||0; const el=document.getElementById(`score-${m.id}`); if(el) el.textContent = s; }); }
 
   function showFinalScores(){ const sorted = MODELS.map(m=>({ ...m, score: (tournamentState.scores&&tournamentState.scores[m.id])||0 })).sort((a,b)=>b.score-a.score); scoresTable.innerHTML=''; sorted.forEach((m,idx)=>{ const row=document.createElement('div'); row.style.display='grid'; row.style.gridTemplateColumns='50px 150px 80px'; row.style.gap='12px'; row.style.padding='8px'; row.style.borderRadius='4px'; row.style.backgroundColor = idx===0? '#d4edda' : '#fff'; row.innerHTML = `<strong>#${idx+1}</strong> <span style="cursor:pointer;color:${m.color};fontWeight:bold" onclick="alert('${m.full}')">${m.short}</span> <strong>${m.score}</strong>`; scoresTable.appendChild(row); }); finalScoresDiv.style.display='block'; }
 
   function renderMatchLog(){
-    const tbody = document.querySelector('#match-log tbody');
-    if(!tbody) return;
-    tbody.innerHTML = '';
-    tournamentState.matchHistory.forEach((match, mi)=>{
-      const a = match.a, b = match.b;
-      match.history.forEach((roundRec, ri)=>{
-        const recA = roundRec[a];
-        const recB = roundRec[b];
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td style="padding:6px;border:1px solid #eee">P${a} vs P${b}</td>
-          <td style="padding:6px;border:1px solid #eee">${ri+1}</td>
-          <td style="padding:6px;border:1px solid #eee">${recA.action.toUpperCase()}</td>
-          <td style="padding:6px;border:1px solid #eee">${(recA.reply || '').replace(/</g,'&lt;').replace(/>/g,'&gt;').slice(0,120)}</td>
-          <td style="padding:6px;border:1px solid #eee">${recB.action.toUpperCase()}</td>
-          <td style="padding:6px;border:1px solid #eee">${(recB.reply || '').replace(/</g,'&lt;').replace(/>/g,'&gt;').slice(0,120)}</td>
-          <td style="padding:6px;border:1px solid #eee">${recA.points}</td>
-          <td style="padding:6px;border:1px solid #eee">${recB.points}</td>
-        `;
-        tbody.appendChild(tr);
-      });
+    const table = document.getElementById('match-log');
+    if(!table) return;
+
+    // Build header dynamically based on MODELS
+    const cols = MODELS.length || 6;
+    let theadHtml = '<thead><tr style="background:#f7f7f7"><th style="padding:6px;border:1px solid #eee">Player / Model</th>';
+    MODELS.forEach(m=>{
+      const modelParts = (m.full||'').split('/');
+      const provider = modelParts[0] || m.short;
+      const modelName = modelParts[1] ? modelParts[1].split(':')[0] : 'unknown';
+      theadHtml += `<th style="padding:6px;border:1px solid #eee">P${m.id}<br/><span style=\"font-size:0.8em;color:#666\">${provider}/${modelName}</span></th>`;
     });
+    theadHtml += '</tr></thead>';
+
+    let tbodyHtml = '<tbody>';
+
+    // helper to find match between i and j
+    const findMatch = (i,j) => tournamentState.matchHistory.find(m => (m.a===i && m.b===j) || (m.a===j && m.b===i));
+
+    for(let i=0;i<MODELS.length;i++){
+      const rowId = MODELS[i].id;
+      const modelI = MODELS[i];
+      tbodyHtml += `<tr>`;
+      tbodyHtml += `<td style="padding:6px;border:1px solid #eee;background:#f7f7f7;font-weight:bold">P${rowId}<br/><span style=\"font-size:0.85em;color:#333\">${modelI.short}</span></td>`;
+
+      for(let j=0;j<MODELS.length;j++){
+        const colId = MODELS[j].id;
+        let cellHtml = '';
+        if(rowId === colId){
+          cellHtml = '<div style="background:#e0e0e0;height:60px;display:flex;align-items:center;justify-content:center">—</div>';
+        } else {
+          const match = findMatch(rowId, colId);
+          if(!match || !match.history || match.history.length===0){
+            cellHtml = '<div style="padding:6px;min-height:60px">—</div>';
+          } else {
+            // determine whether match.a is rowId or colId to get correct ordering
+            const isRowA = match.a === rowId;
+            // total for the row player
+            let total = 0;
+            match.history.forEach(rr=>{ const e = rr[rowId]; if(e && e.points) total += e.points; });
+            cellHtml = `<div style="padding:6px;max-height:220px;overflow:auto;text-align:left;">`;
+            cellHtml += `<div style="font-weight:bold;margin-bottom:6px">Total: ${total} pts</div>`;
+            match.history.forEach((rr,idx)=>{
+              const aEntry = rr[rowId] || {};
+              const bEntry = rr[colId] || {};
+              const aAct = aEntry.action? aEntry.action.toUpperCase() : 'N/A';
+              const aPts = (aEntry.points!=null)? aEntry.points : 0;
+              const aReason = aEntry.reasoning? (aEntry.reasoning.length>180? aEntry.reasoning.slice(0,177)+'...' : aEntry.reasoning) : '';
+              const bAct = bEntry.action? bEntry.action.toUpperCase() : 'N/A';
+              const bPts = (bEntry.points!=null)? bEntry.points : 0;
+              const bReason = bEntry.reasoning? (bEntry.reasoning.length>180? bEntry.reasoning.slice(0,177)+'...' : bEntry.reasoning) : '';
+              cellHtml += `<div style="border-top:1px solid #eee;padding:6px 0"><strong>R${idx+1}:</strong> P${rowId}: ${aAct} (+${aPts})${aReason?` — ${aReason}`:''}<br/>P${colId}: ${bAct} (+${bPts})${bReason?` — ${bReason}`:''}</div>`;
+            });
+            cellHtml += `</div>`;
+          }
+        }
+        tbodyHtml += `<td style="padding:6px;border:1px solid #eee;vertical-align:top">${cellHtml}</td>`;
+      }
+
+      tbodyHtml += `</tr>`;
+    }
+
+    tbodyHtml += '</tbody>';
+
+    table.innerHTML = theadHtml + tbodyHtml;
   }
 
   startBtn.addEventListener('click', ()=>{ if(gameRunning) return; createPlayerPanels(); runTournament(); });
